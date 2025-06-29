@@ -4,5 +4,8 @@
 clc; clear;
 startup;  % 添加路径
 
-% 主函数调用动画显示
-ui.display_dual_arm();
+% 从test.m获取目标点序列
+[targetsA, targetsB] = test.test();
+
+% 调用动画显示函数，传入目标点序列
+ui.display_dual_arm(targetsA, targetsB);

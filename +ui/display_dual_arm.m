@@ -1,4 +1,4 @@
-function display_dual_arm()
+function display_dual_arm(targetsA, targetsB)
     % 初始化设置
     figure('Name', 'Dual Arm Trajectory Planning', 'NumberTitle', 'off', 'Color', 'k');
     axis equal;
@@ -7,7 +7,6 @@ function display_dual_arm()
     set(gca, 'Color', 'k', 'GridColor', [0.4 0.4 0.4], 'XColor', 'w', 'YColor', 'w', 'ZColor', 'w');
     grid on; hold on; view(35, 25);
     
-    
     % 添加光源
     light('Position', [0 0 100], 'Style', 'infinite', 'Color', [1 1 0.8]);
     light('Position', [50 50 50], 'Style', 'infinite', 'Color', [0.8 0.8 1]);
@@ -15,7 +14,7 @@ function display_dual_arm()
     
     % 获取机械臂参数
     [L1, L2] = model.arm_parameters();
-    boxLength = 30; boxHeight = 10; boxDepth = 10;
+    boxLength = 30; boxDepth = 10; boxHeight = 10;
     jointRadius = 0.8; % 增大关节半径 (直径1.6cm)
     linkWidth = 0.8;   % 增大连杆截面宽度 (cm)
     thickness = 0.2;   % 盒子厚度 (2mm)
@@ -27,39 +26,81 @@ function display_dual_arm()
     % 绘制工作区域盒子
     draw_box(boxLength, boxDepth, boxHeight);
     
-    % 定义目标位置（盒子中心正前方35cm）
-    boxCenter = [boxLength/2, boxDepth/2, boxHeight/2];
-    targetPos = boxCenter + [0, -35, 0];  % Y负方向为正前方
+    % 初始关节角度（尝试从文件加载或使用零值）
+    if exist('current_arm_state.mat', 'file') == 2
+        load('current_arm_state.mat', 'final_angles');
+        current_angles = final_angles;
+    else
+        current_angles = zeros(1, 6);
+    end
     
-    % 标记目标位置
-    plot3(targetPos(1), targetPos(2), targetPos(3), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
-    text(targetPos(1), targetPos(2), targetPos(3)+5, 'Target Position', 'Color', 'r', 'FontSize', 12);
+    % 初始化轨迹数据
+    all_joint_angles = [];
+    all_end_positions = [];
+    total_time_vector = [];
     
-    % 初始关节角度（示例值）
-    current_angles = zeros(1, 6);
+    % 遍历所有目标点
+    for point_idx = 1:size(targetsA, 1)
+        % 当前目标点
+        targetA = targetsA(point_idx, :);
+        targetB = targetsB(point_idx, :);
+        
+        % 标记目标位置
+        % plot3(targetA(1), targetA(2), targetA(3), 'bo', 'MarkerSize', 8, 'LineWidth', 1.5);
+        % plot3(targetB(1), targetB(2), targetB(3), 'ro', 'MarkerSize', 8, 'LineWidth', 1.5);
+        % text(targetA(1), targetA(2), targetA(3)+3, sprintf('Target %d-A', point_idx), 'Color', 'b', 'FontSize', 10);
+        % text(targetB(1), targetB(2), targetB(3)+3, sprintf('Target %d-B', point_idx), 'Color', 'r', 'FontSize', 10);
+        % 
+        % 执行轨迹规划
+        [time_vector, joint_angles, end_positions] = trajectory.trajectory_generator(...
+            current_angles, targetA, targetB, L1, L2);
+        
+        % 确保 time_vector 是列向量
+        time_vector = time_vector(:);
+        
+        % 累积轨迹数据
+        if isempty(all_joint_angles)
+            all_joint_angles = joint_angles;
+            all_end_positions = end_positions;
+            total_time_vector = time_vector;
+        else
+            % 调整时间向量（累加）
+            time_offset = total_time_vector(end);
+            time_vector = time_vector + time_offset;
+            
+            % 累积数据
+            all_joint_angles = [all_joint_angles; joint_angles];
+            all_end_positions = [all_end_positions; end_positions];
+            total_time_vector = [total_time_vector; time_vector];
+        end
+        
+        % 更新当前角度
+        current_angles = joint_angles(end, :);
+    end
     
-    % 执行轨迹规划 - 两个机械臂都移动到同一个目标点
-    [time_vector, joint_angles, end_positions] = trajectory.trajectory_generator(...
-        current_angles, targetPos, targetPos, L1, L2);
-    
-    numFrames = length(time_vector);
-    
-    % 保存最终位置为当前位置
-    final_angles = joint_angles(end, :);
+    % 保存最终状态
+    final_angles = all_joint_angles(end, :);
+    end_positions = all_end_positions;
     save('current_arm_state.mat', 'final_angles', 'end_positions');
     
     % 动画循环
+    numFrames = length(total_time_vector);
     for t = 1:numFrames
         cla;
         draw_box(boxLength, boxDepth, boxHeight);
-        plot3(targetPos(1), targetPos(2), targetPos(3), 'ro', 'MarkerSize', 10, 'LineWidth', 2);
+        
+        % % 绘制所有目标点
+        % for point_idx = 1:size(targetsA, 1)
+        %     plot3(targetsA(point_idx, 1), targetsA(point_idx, 2), targetsA(point_idx, 3), 'bo', 'MarkerSize', 8, 'LineWidth', 1.5);
+        %     plot3(targetsB(point_idx, 1), targetsB(point_idx, 2), targetsB(point_idx, 3), 'ro', 'MarkerSize', 8, 'LineWidth', 1.5);
+        % end
         
         % 绘制轨迹路径
-        plot3(end_positions(1:t,1), end_positions(1:t,2), end_positions(1:t,3), 'b-', 'LineWidth', 1.5);
-        plot3(end_positions(1:t,4), end_positions(1:t,5), end_positions(1:t,6), 'r-', 'LineWidth', 1.5);
+        plot3(all_end_positions(1:t,1), all_end_positions(1:t,2), all_end_positions(1:t,3), 'b-', 'LineWidth', 1.5);
+        plot3(all_end_positions(1:t,4), all_end_positions(1:t,5), all_end_positions(1:t,6), 'r-', 'LineWidth', 1.5);
         
         % 提取当前关节角度
-        angles = joint_angles(t, :);
+        angles = all_joint_angles(t, :);
         
         % ==== 红色机械臂 (B) ====
         [joints_red, R_red] = calculate_arm_positions(baseRed, angles(4), angles(5), angles(6), L1, L2, 0);
@@ -70,10 +111,16 @@ function display_dual_arm()
         draw_arm(joints_blue, R_blue, linkWidth, jointRadius, [0.2 0.4 1], L2);
         
         % 显示信息
-        title_str = sprintf('Time: %.1fs/%.1fs | A: (%.1f, %.1f, %.1f) | B: (%.1f, %.1f, %.1f)', ...
-            time_vector(t), time_vector(end), ...
-            end_positions(t,1), end_positions(t,2), end_positions(t,3), ...
-            end_positions(t,4), end_positions(t,5), end_positions(t,6));
+        current_target_idx = find(t <= cumsum(size(targetsA, 1) * ones(1, numFrames), 1));
+        if isempty(current_target_idx)
+            current_target_idx = size(targetsA, 1);
+        end
+        
+        title_str = sprintf('Target %d/%d | Time: %.1fs/%.1fs | A: (%.1f, %.1f, %.1f) | B: (%.1f, %.1f, %.1f)', ...
+            current_target_idx, size(targetsA, 1), ...
+            total_time_vector(t), total_time_vector(end), ...
+            all_end_positions(t,1), all_end_positions(t,2), all_end_positions(t,3), ...
+            all_end_positions(t,4), all_end_positions(t,5), all_end_positions(t,6));
         
         title(title_str, 'Color', 'w', 'FontSize', 10);
         drawnow;
@@ -83,15 +130,15 @@ function display_dual_arm()
     end
     
     % 显示最终位置误差
-    final_error_a = norm(end_positions(end,1:3) - targetPos);
-    final_error_b = norm(end_positions(end,4:6) - targetPos);
+    final_error_a = norm(all_end_positions(end,1:3) - targetsA(end,:));
+    final_error_b = norm(all_end_positions(end,4:6) - targetsB(end,:));
     
     fprintf('轨迹完成:\n');
     fprintf('  机械臂A末端误差: %.4f cm\n', final_error_a);
     fprintf('  机械臂B末端误差: %.4f cm\n', final_error_b);
 end
 
-% 保留原有的辅助函数（draw_box, calculate_arm_positions, draw_arm等）
+
 
 function draw_box(boxLength, boxDepth, boxHeight)
 % 绘制机械臂盒子（除正面外）- 使用深色方案
@@ -315,6 +362,7 @@ R = [cos(theta), -sin(theta), 0;
 end
 
 function R = roty(theta)
+theta = -theta;
 % 绕Y轴旋转
 R = [cos(theta),  0, sin(theta);
      0,           1, 0;
