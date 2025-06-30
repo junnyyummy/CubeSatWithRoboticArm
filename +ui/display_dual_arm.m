@@ -1,4 +1,4 @@
-function display_dual_arm(targetsA, targetsB)
+function display_dual_arm(targetsA, targetsB, L1, L2, boxLength, boxDepth, boxHeight, thickness)
     % 初始化设置
     figure('Name', 'Dual Arm Trajectory Planning', 'NumberTitle', 'off', 'Color', 'k');
     axis equal;
@@ -12,12 +12,9 @@ function display_dual_arm(targetsA, targetsB)
     light('Position', [50 50 50], 'Style', 'infinite', 'Color', [0.8 0.8 1]);
     lighting gouraud;
     
-    % 获取机械臂参数
-    [L1, L2] = model.arm_parameters();
-    boxLength = 30; boxDepth = 10; boxHeight = 10;
+    % 关节和连杆参数
     jointRadius = 0.8; % 增大关节半径 (直径1.6cm)
     linkWidth = 0.8;   % 增大连杆截面宽度 (cm)
-    thickness = 0.2;   % 盒子厚度 (2mm)
 
     % 基座位置
     baseBlue = [2*thickness, 0, 2*thickness];                 % 蓝臂左下角靠里
@@ -45,15 +42,9 @@ function display_dual_arm(targetsA, targetsB)
         targetA = targetsA(point_idx, :);
         targetB = targetsB(point_idx, :);
         
-        % 标记目标位置
-        % plot3(targetA(1), targetA(2), targetA(3), 'bo', 'MarkerSize', 8, 'LineWidth', 1.5);
-        % plot3(targetB(1), targetB(2), targetB(3), 'ro', 'MarkerSize', 8, 'LineWidth', 1.5);
-        % text(targetA(1), targetA(2), targetA(3)+3, sprintf('Target %d-A', point_idx), 'Color', 'b', 'FontSize', 10);
-        % text(targetB(1), targetB(2), targetB(3)+3, sprintf('Target %d-B', point_idx), 'Color', 'r', 'FontSize', 10);
-        % 
         % 执行轨迹规划
         [time_vector, joint_angles, end_positions] = trajectory.trajectory_generator(...
-            current_angles, targetA, targetB, L1, L2);
+            current_angles, targetA, targetB);
         
         % 确保 time_vector 是列向量
         time_vector = time_vector(:);
@@ -88,12 +79,6 @@ function display_dual_arm(targetsA, targetsB)
     for t = 1:numFrames
         cla;
         draw_box(boxLength, boxDepth, boxHeight);
-        
-        % % 绘制所有目标点
-        % for point_idx = 1:size(targetsA, 1)
-        %     plot3(targetsA(point_idx, 1), targetsA(point_idx, 2), targetsA(point_idx, 3), 'bo', 'MarkerSize', 8, 'LineWidth', 1.5);
-        %     plot3(targetsB(point_idx, 1), targetsB(point_idx, 2), targetsB(point_idx, 3), 'ro', 'MarkerSize', 8, 'LineWidth', 1.5);
-        % end
         
         % 绘制轨迹路径
         plot3(all_end_positions(1:t,1), all_end_positions(1:t,2), all_end_positions(1:t,3), 'b-', 'LineWidth', 1.5);
@@ -136,9 +121,66 @@ function display_dual_arm(targetsA, targetsB)
     fprintf('轨迹完成:\n');
     fprintf('  机械臂A末端误差: %.4f cm\n', final_error_a);
     fprintf('  机械臂B末端误差: %.4f cm\n', final_error_b);
+    
+    % ==== 生成SVG和CSV文件 ====
+    numFrames = length(total_time_vector);
+    timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+    svg_filename = sprintf('joint_angles_%s.svg', timestamp);
+    csv_filename = sprintf('joint_angles_%s.csv', timestamp);
+    
+    fprintf('正在将关节角度序列保存到文件:\n');
+    fprintf('  SVG: %s\n  CSV: %s\n', svg_filename, csv_filename);
+    
+    % 首先保存CSV文件
+    csvwrite(csv_filename, all_joint_angles);
+    
+    % 生成SVG文件
+    try
+        % 计算所需高度
+        svg_height = numFrames * 20 + 150;
+        
+        % 创建并写入SVG文件
+        fid = fopen(svg_filename, 'w');
+        if fid == -1
+            error('无法创建SVG文件');
+        end
+        
+        % 写入XML头部
+        fprintf(fid, '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n');
+        fprintf(fid, '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" ');
+        fprintf(fid, '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n');
+        fprintf(fid, '<svg width="1200" height="%d" ', svg_height);
+        fprintf(fid, 'xmlns="http://www.w3.org/2000/svg" version="1.1">\n');
+        fprintf(fid, '<style>text { font-family: monospace; }</style>\n');
+        
+        % 背景
+        fprintf(fid, '<rect width=''100%%'' height=''100%%'' fill=''white''/>\n');
+        
+        fprintf(fid, '<text x="20" y="30" font-size="14" font-weight="bold">关节角度序列 (共%d个点)</text>\n', numFrames);
+        fprintf(fid, '<text x="20" y="50" font-size="12">时间: %.2fs - %.2fs</text>\n', ...
+                total_time_vector(1), total_time_vector(end));
+        fprintf(fid, '<text x="20" y="70" font-size="10">索引   θ1A       θ2A       θ3A       θ1B       θ2B       θ3B</text>\n');
+        
+        % 写入数据行
+        y_pos = 90;
+        for i = 1:numFrames
+            angles = all_joint_angles(i, :);
+            fprintf(fid, '<text x="20" y="%d" font-size="10">%05d  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f</text>\n', ...
+                    y_pos, i, angles(1), angles(2), angles(3), angles(4), angles(5), angles(6));
+            y_pos = y_pos + 20;
+        end
+        
+        % 添加文件信息
+        fprintf(fid, '<text x="20" y="%d" font-size="10" font-weight="bold">文件: %s</text>\n', y_pos + 20, svg_filename);
+        fprintf(fid, '</svg>');
+        fclose(fid);
+        
+        fprintf('SVG文件已成功生成\n');
+    catch ME
+        fprintf('生成SVG时出错: %s\n', ME.message);
+        fprintf('已生成CSV文件作为替代\n');
+    end
 end
-
-
 
 function draw_box(boxLength, boxDepth, boxHeight)
 % 绘制机械臂盒子（除正面外）- 使用深色方案
@@ -177,25 +219,6 @@ patch('Vertices', vertices, 'Faces', [1 4 8 5], ...
 patch('Vertices', vertices, 'Faces', [2 3 7 6], ...
       'FaceColor', [0.15 0.15 0.15], 'FaceAlpha', 0.85, 'EdgeColor', 'none', ...
       'AmbientStrength', 0.5, 'DiffuseStrength', 0.7);
-end
-
-function [q1a, q2a, q3a, q1b, q2b, q3b] = apply_joint_limits(t)
-% 应用关节运动范围限制
-% 关节1: 0~180度 (在盒子正面范围运动)
-% 关节2: ±60度 (控制上下运动)
-% 关节3: 0~360度 (自由旋转)
-
-% 生成原始轨迹
-[raw_q1a, raw_q2a, raw_q3a, raw_q1b, raw_q2b, raw_q3b] = trajectory.trajectory_generator(t);
-
-% 应用限制
-q1a = mod(raw_q1a, pi); % 0~180度
-q2a = max(min(raw_q2a, deg2rad(60)), deg2rad(-60)); % ±60度
-q3a = mod(raw_q3a, 2*pi); % 0~360度
-
-q1b = mod(raw_q1b, pi); % 0~180度
-q2b = max(min(raw_q2b, deg2rad(60)), deg2rad(-60)); % ±60度
-q3b = mod(raw_q3b, 2*pi); % 0~360度
 end
 
 function [joints, R_total] = calculate_arm_positions(base, q1, q2, q3, L1, L2, z_offset)
@@ -281,7 +304,7 @@ faces = [...
 % 添加边缘增强可视性
 edgeColor = 'none';
 % if showEdges
-%     edgeColor = [0 0 0];
+%     edgeColor = [0.2 0.2 0.2];
 % end
 
 patch('Vertices', vertices, 'Faces', faces, ...
@@ -295,22 +318,9 @@ function draw_effector(center, R, size, color)
 % 主夹爪方向（使用总旋转矩阵确定方向）
 grip_dir = R(:,1)';  % X轴方向
 
-% 三个夹爪方向
-dir1 = grip_dir;
-% dir2 = R * [cos(2*pi/3); sin(2*pi/3); 0]; dir2 = dir2';
-% dir3 = R * [cos(4*pi/3); sin(4*pi/3); 0]; dir3 = dir3';
-% 
-% % 绘制夹爪臂
+% 绘制夹爪臂
 grip_width = size/4;
-% draw_link(center, center + 0.8*size*dir1, grip_width, color, false);
-% draw_link(center, center + 0.8*size*dir2, grip_width, color, false);
-% draw_link(center, center + 0.8*size*dir3, grip_width, color, false);
-% 
-% % 绘制夹爪尖端（锥形）
-% draw_cone(center + 0.8*size*dir1, dir1, size*0.2, grip_width*1.2, [0.9 0.9 0.3]);
-% draw_cone(center + 0.8*size*dir2, dir2, size*0.2, grip_width*1.2, [0.9 0.9 0.3]);
-% draw_cone(center + 0.8*size*dir3, dir3, size*0.2, grip_width*1.2, [0.9 0.9 0.3]);
-draw_cone(center, dir1, size*0.3, grip_width*1.2, [0.9 0.9 0.3]);
+draw_cone(center, grip_dir, size*0.3, grip_width*1.2, [0.9 0.9 0.3]);
 end
 
 function draw_cone(base, direction, height, radius, color)
@@ -362,8 +372,8 @@ R = [cos(theta), -sin(theta), 0;
 end
 
 function R = roty(theta)
-theta = -theta;
 % 绕Y轴旋转
+theta = -theta;
 R = [cos(theta),  0, sin(theta);
      0,           1, 0;
     -sin(theta),  0, cos(theta)];

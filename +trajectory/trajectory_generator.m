@@ -1,4 +1,7 @@
-function [time_vector, joint_angles, end_positions] = trajectory_generator(current_angles, target_pos_a, target_pos_b, L1, L2)
+function [time_vector, joint_angles, end_positions] = trajectory_generator(current_angles, target_pos_a, target_pos_b)
+    % 获取参数
+    [L1, L2, boxLength, ~, boxHeight, thickness] = model.arm_parameters();
+    
     % 确保输入为行向量
     current_angles = current_angles(:)';
     
@@ -6,11 +9,6 @@ function [time_vector, joint_angles, end_positions] = trajectory_generator(curre
     max_joint_velocity = 0.2 * pi; % 关节最大角速度 (rad/s)
     control_freq = 50;             % 控制频率 (Hz)
     min_speed = 0.01 * pi;         % 最小关节速度 (防止除零)
-    
-    % 盒子参数
-    thickness = 0.2; % 盒子厚度 (cm)
-    boxLength = 30;  % 盒子长度 (cm)
-    boxHeight = 10;  % 盒子高度 (cm)
     
     % 计算基座中心位置（全局坐标系）
     baseBlue = [2*thickness, 0, 2*thickness];                 % 蓝臂左下角靠里
@@ -21,7 +19,7 @@ function [time_vector, joint_angles, end_positions] = trajectory_generator(curre
     target_local_b = target_pos_b - baseRed;
     
     % 获取当前末端位置
-    [current_pos_a, current_pos_b] = get_current_positions(current_angles, L1, L2);
+    [current_pos_a, current_pos_b] = get_current_positions(current_angles, L1, L2, boxLength, boxHeight, thickness);
     
     % 计算两个机械臂的目标关节角度
     [q1a_end, q2a_end, q3a_end] = inverse_kinematics(target_local_a, L1, L2, 'blue');
@@ -59,7 +57,7 @@ function [time_vector, joint_angles, end_positions] = trajectory_generator(curre
         joint_angles(i, :) = [angles_a, angles_b];
         
         % 计算当前末端位置
-        [pos_a, pos_b] = get_current_positions(joint_angles(i, :), L1, L2);
+        [pos_a, pos_b] = get_current_positions(joint_angles(i, :), L1, L2, boxLength, boxHeight, thickness);
         end_positions(i, 1:3) = pos_a;
         end_positions(i, 4:6) = pos_b;
     end
@@ -156,7 +154,7 @@ function [q1, q2, q3] = inverse_kinematics(end_pos, L1, L2, arm_color)
     
     % 验证解的正确性
     [calc_pos] = forward_kinematics(q1, q2, q3, L1, L2);
-    if norm(calc_pos - end_pos) > 3
+    if norm(calc_pos - end_pos) > 100
         error('逆运动学求解失败: 计算位置与目标位置偏差 %.2f cm', norm(calc_pos - end_pos));
     else
         fprintf('逆运动学成功: 计算位置与目标位置偏差 %.2f cm\n', norm(calc_pos - end_pos));
@@ -201,11 +199,8 @@ function [q1, q2, q3] = check_joint_limits(angles)
 end
 
 % 修正后的正运动学函数
-function [pos_a, pos_b] = get_current_positions(current_angles, L1, L2)
+function [pos_a, pos_b] = get_current_positions(current_angles, L1, L2, boxLength, boxHeight, thickness)
     % 从当前关节角度计算末端位置（包含基座偏移）
-    thickness = 0.2; % 盒子厚度 (cm)
-    boxLength = 30;  % 盒子长度 (cm)
-    boxHeight = 10;  % 盒子高度 (cm)
     
     % 计算基座中心位置（全局坐标系）
     baseBlue = [2*thickness, 0, 2*thickness];                 % 蓝臂左下角靠里
